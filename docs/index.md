@@ -39,9 +39,8 @@ The service starts at:
 |----------|-------------|
 | [Architecture](architecture.md) | MCP gateway design and flows |
 | [API Reference](api-reference.md) | REST and WebSocket endpoints |
-| [Configuration](configuration.md) | Environment variables |
-| [MCP Integration](mcp-integration.md) | MCP protocol implementation |
-| [Agent Setup](agent-setup.md) | How to connect AI agents |
+| [Setup](setup.md) | Environment variables and local setup |
+| [README](README.md) | Service overview, API surface, MCP tool flow |
 
 ## How It Fits in ConFuse
 
@@ -61,7 +60,7 @@ graph TD
     
     %% Supporting Services
     CC -->|Feature Flags| FT[Feature-Toggle<br/>Port: 3099]
-    CC -->|Data Export| DV[Data-Vent<br/>Port: 3040]
+    CC -->|Data Export| DV[Data-Vent<br/>Port: 3002]
     
     %% MCP Server (if separate)
     CC -->|MCP Protocol| MCP[MCP Server<br/>Port: 3006<br/>Rust Implementation]
@@ -187,8 +186,8 @@ MCP_SERVER_URL=http://mcp-server:3006
 MCP_SERVER_MODE=http
 AUTH_MIDDLEWARE_GRPC_ADDR=http://auth-middleware:3010
 FEATURE_TOGGLE_SERVICE_URL=http://feature-toggle:3099
-DATA_VENT_URL=http://data-vent:3040
-CORS_ORIGINS=http://localhost:3000,http://localhost:8080
+DATA_VENT_URL=http://data-vent:3002
+CORS_ORIGINS=http://localhost:3000,http://localhost:3020
 LOG_LEVEL=INFO
 
 # PostgreSQL Configuration

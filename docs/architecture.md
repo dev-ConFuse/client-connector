@@ -24,9 +24,9 @@ graph TB
     
     %% Service Layer
     subgraph "Internal Services"
-        AuthMW[Auth-Middleware<br/>gRPC: 3010]
+        AuthMW[Auth-Middleware<br/>gRPC: 50058]
         FT[Feature-Toggle<br/>Port: 3099]
-        DV[Data-Vent<br/>Port: 3040]
+        DV[Data-Vent<br/>Port: 3002]
     end
     
     %% Data Layer
