@@ -152,6 +152,10 @@ def create_app() -> FastAPI:
 
     # Mount routers
     from app.mcp_server import get_mcp_app
+    from app.routing import arc_router
+
+    # Arc memory engine REST API (sessions, memories, recall, context capsules)
+    app.include_router(arc_router)
 
     # Using a versioned, fixed API endpoint for MCP
     app.mount("/api/v1/mcp", get_mcp_app().sse_app())

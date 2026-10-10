@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     # Downstream Services (for MCP gateway operations)
     data_vent_url: str = Field(alias="DATA_VENT_URL")
 
+    # Arc memory-unit service (Rust, port 3006) — authoritative memory store
+    arc_service_url: str = Field(alias="ARC_SERVICE_URL", default="http://localhost:3006")
+
     # CORS
     cors_origins: str = Field(alias="CORS_ORIGINS")
 

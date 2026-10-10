@@ -359,6 +359,384 @@ async def fetch_test_data() -> str:
     return "This is test data from the client-connector."
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Arc memory engine tools (spec §11.2) — writes go to ConFuse's own memory
+# store only; connected repositories/documentation are never modified.
+# ─────────────────────────────────────────────────────────────────────────────
+
+from uuid import UUID as _UUID
+
+from app.schemas.arc import (
+    ArcMemoryInput,
+    ArcSessionEventInput,
+    ArcSessionInput,
+    EvidenceSpanInput,
+    MemoryCorrectionInput,
+    MemoryScope,
+    MemoryType,
+    CorrectionAction,
+    RecallQuery,
+    SessionFinishInput,
+    SessionStatus,
+)
+from app.services.arc_store import ArcCaller, ArcError, ArcStore
+from app.services.retrieval_coordinator import RetrievalCoordinator
+
+_arc_store = ArcStore()
+_coordinator = RetrievalCoordinator(_arc_store)
+
+
+def _arc_caller(workspace_id: str, principal_id: str | None,
+                session_id: str | None) -> ArcCaller:
+    """Caller identity for Arc scope enforcement.
+
+    NOTE (documented limitation): the MCP SSE transport does not yet bind a
+    verified principal to tool calls, so agents declare their identity and
+    workspace; workspace/scope isolation is enforced on every operation.
+    """
+    return ArcCaller(
+        workspace_id=workspace_id,
+        principal_id=principal_id or "mcp-agent",
+        session_id=session_id,
+    )
+
+
+def _arc_error(exc: Exception) -> dict:
+    if isinstance(exc, ArcError):
+        return {"error": str(exc), "status_code": exc.status_code}
+    logger.error("arc_tool_failed", error=str(exc))
+    return {"error": str(exc), "status_code": 500}
+
+
+@mcp.tool()
+async def arc_session_start(
+    workspace_id: str,
+    title: str = "",
+    task_summary: str = "",
+    agent_provider: str = "",
+    agent_runtime: str = "",
+    external_session_id: str = "",
+    scope: str = "workspace",
+    root_repository_id: str = "",
+    root_revision: str = "",
+    principal_id: str = "",
+) -> dict:
+    """Create or identify a persistent agent session in Arc.
+
+    Use the same external_session_id to resume a session known to a specific
+    coding tool; different agents share sessions via workspace scope.
+    """
+    try:
+        payload = ArcSessionInput(
+            workspace_id=workspace_id,
+            title=title or None,
+            task_summary=task_summary or None,
+            scope=MemoryScope(scope),
+            external_session_id=external_session_id or None,
+            agent_provider=agent_provider or None,
+            agent_runtime=agent_runtime or None,
+            principal_id=principal_id or None,
+            root_repository_id=root_repository_id or None,
+            root_revision=root_revision or None,
+        )
+        session = await _arc_store.start_session(
+            payload, _arc_caller(workspace_id, principal_id, None)
+        )
+        return {"session": session.model_dump(mode="json")}
+    except Exception as exc:
+        return _arc_error(exc)
+
+
+@mcp.tool()
+async def arc_session_resume(session_id: str, workspace_id: str,
+                             event_limit: int = 10) -> dict:
+    """Resume a session: compact handoff, recent events and linked memories."""
+    try:
+        state = await _arc_store.get_session_state(
+            session_id, _arc_caller(workspace_id, None, session_id), event_limit
+        )
+        return state
+    except Exception as exc:
+        return _arc_error(exc)
+
+
+@mcp.tool()
+async def arc_session_append(
+    session_id: str,
+    workspace_id: str,
+    event_type: str,
+    summary: str = "",
+    actor_id: str = "",
+    source_artifact_ids: list[str] | None = None,
+    memory_ids: list[str] | None = None,
+) -> dict:
+    """Append a structured observation to a session's append-only history."""
+    try:
+        payload = ArcSessionEventInput(
+            event_type=event_type,
+            summary=summary or None,
+            actor_id=actor_id or None,
+            source_artifact_ids=source_artifact_ids or [],
+            memory_ids=[_UUID(m) for m in (memory_ids or [])],
+        )
+        event = await _arc_store.append_event(
+            session_id, payload, _arc_caller(workspace_id, actor_id, session_id)
+        )
+        return {"event": event.model_dump(mode="json")}
+    except Exception as exc:
+        return _arc_error(exc)
+
+
+@mcp.tool()
+async def arc_session_summarize(
+    session_id: str,
+    workspace_id: str,
+    task_summary: str = "",
+    title: str = "",
+    next_steps: str = "",
+    unresolved_questions: str = "",
+) -> dict:
+    """Create or update the concise summary of a session."""
+    try:
+        payload = SessionFinishInput(
+            title=title or None,
+            task_summary=task_summary or None,
+            next_steps=next_steps or None,
+            unresolved_questions=unresolved_questions or None,
+        )
+        session = await _arc_store.summarize_session(
+            session_id, payload, _arc_caller(workspace_id, None, session_id)
+        )
+        return {"session": session.model_dump(mode="json")}
+    except Exception as exc:
+        return _arc_error(exc)
+
+
+@mcp.tool()
+async def arc_session_finish(
+    session_id: str,
+    workspace_id: str,
+    status: str = "finished",
+    handoff_summary: str = "",
+    next_steps: str = "",
+    unresolved_questions: str = "",
+) -> dict:
+    """Finish, pause or hand off a session; history is preserved."""
+    try:
+        payload = SessionFinishInput(
+            status=SessionStatus(status),
+            handoff_summary=handoff_summary or None,
+            next_steps=next_steps or None,
+            unresolved_questions=unresolved_questions or None,
+        )
+        session = await _arc_store.finish_session(
+            session_id, payload, _arc_caller(workspace_id, None, session_id)
+        )
+        return {"session": session.model_dump(mode="json")}
+    except Exception as exc:
+        return _arc_error(exc)
+
+
+@mcp.tool()
+async def arc_recall(
+    query: str,
+    workspace_id: str,
+    session_id: str = "",
+    limit: int = 10,
+    include_history: bool = False,
+) -> dict:
+    """Retrieve relevant memories from Arc (keyed, lexical and session paths)."""
+    try:
+        payload = RecallQuery(
+            query=query,
+            workspace_id=workspace_id,
+            session_id=_UUID(session_id) if session_id else None,
+            limit=limit,
+            include_history=include_history,
+        )
+        hits = await _arc_store.recall(
+            payload, _arc_caller(workspace_id, None, session_id or None)
+        )
+        return {"results": hits}
+    except Exception as exc:
+        return _arc_error(exc)
+
+
+@mcp.tool()
+async def arc_record_memory(
+    workspace_id: str,
+    title: str,
+    content: str,
+    memory_type: str,
+    summary: str = "",
+    scope: str = "workspace",
+    session_id: str = "",
+    canonical_key: str = "",
+    lookup_keys: list[str] | None = None,
+    source_ids: list[str] | None = None,
+    source_revisions: list[str] | None = None,
+    entity_ids: list[str] | None = None,
+    confidence: float = 0.5,
+    confidence_reason: str = "",
+    principal_id: str = "",
+) -> dict:
+    """Persist an internal Arc memory with declared type and provenance.
+
+    Memory types: episodic, semantic, procedural, decision, session. Writes go
+    to ConFuse's Arc store only — connected sources are never modified.
+    """
+    try:
+        payload = ArcMemoryInput(
+            workspace_id=workspace_id,
+            memory_type=MemoryType(memory_type),
+            title=title,
+            content=content,
+            summary=summary or None,
+            scope=MemoryScope(scope),
+            session_id=_UUID(session_id) if session_id else None,
+            canonical_key=canonical_key or None,
+            lookup_keys=lookup_keys or [],
+            source_ids=source_ids or [],
+            source_revisions=source_revisions or [],
+            entity_ids=entity_ids or [],
+            confidence=confidence,
+            confidence_reason=confidence_reason or None,
+        )
+        memory = await _arc_store.record_memory(
+            payload, _arc_caller(workspace_id, principal_id, session_id or None)
+        )
+        return {"memory": memory.model_dump(mode="json")}
+    except Exception as exc:
+        return _arc_error(exc)
+
+
+@mcp.tool()
+async def arc_link_evidence(
+    memory_id: str,
+    workspace_id: str,
+    supporting_content: str = "",
+    source_artifact_id: str = "",
+    source_snapshot_id: str = "",
+    locator: str = "",
+    line_start: int = -1,
+    line_end: int = -1,
+    observation_method: str = "direct_observation",
+) -> dict:
+    """Associate a source-grounded evidence span with a memory."""
+    try:
+        payload = EvidenceSpanInput(
+            supporting_content=supporting_content or None,
+            source_artifact_id=source_artifact_id or None,
+            source_snapshot_id=source_snapshot_id or None,
+            locator=locator or None,
+            line_start=line_start if line_start >= 0 else None,
+            line_end=line_end if line_end >= 0 else None,
+            observation_method=observation_method,
+        )
+        evidence = await _arc_store.link_evidence(
+            memory_id, payload, _arc_caller(workspace_id, None, None)
+        )
+        return {"evidence": evidence.model_dump(mode="json")}
+    except Exception as exc:
+        return _arc_error(exc)
+
+
+@mcp.tool()
+async def arc_search_sessions(query: str, workspace_id: str,
+                              limit: int = 10) -> dict:
+    """Find prior sessions by query, artifact, task or identifier."""
+    try:
+        sessions = await _arc_store.search_sessions(
+            query, _arc_caller(workspace_id, None, None), limit
+        )
+        return {"sessions": [s.model_dump(mode="json") for s in sessions]}
+    except Exception as exc:
+        return _arc_error(exc)
+
+
+@mcp.tool()
+async def arc_get_memory(memory_id: str = "", canonical_key: str = "",
+                         workspace_id: str = "") -> dict:
+    """Retrieve a particular memory by ID or canonical key (with evidence)."""
+    try:
+        return await _arc_store.get_memory(
+            _arc_caller(workspace_id, None, None),
+            memory_id=memory_id or None,
+            canonical_key=canonical_key or None,
+        )
+    except Exception as exc:
+        return _arc_error(exc)
+
+
+@mcp.tool()
+async def arc_correct_memory(
+    memory_id: str,
+    workspace_id: str,
+    action: str,
+    reason: str,
+    replacement_title: str = "",
+    replacement_content: str = "",
+    replacement_memory_type: str = "semantic",
+) -> dict:
+    """Mark a memory incorrect/contradicted/superseded — history preserved.
+
+    Optionally records a replacement memory that supersedes the original.
+    """
+    try:
+        replacement = None
+        if replacement_title and replacement_content:
+            replacement = ArcMemoryInput(
+                workspace_id=workspace_id,
+                memory_type=MemoryType(replacement_memory_type),
+                title=replacement_title,
+                content=replacement_content,
+            )
+        correction = MemoryCorrectionInput(
+            action=CorrectionAction(action),
+            reason=reason,
+            replacement=replacement,
+        )
+        return await _arc_store.correct_memory(
+            memory_id, correction, _arc_caller(workspace_id, None, None)
+        )
+    except Exception as exc:
+        return _arc_error(exc)
+
+
+@mcp.tool()
+async def assemble_context(
+    query: str,
+    workspace_id: str,
+    keywords: list[str] | None = None,
+    session_id: str = "",
+    limit: int = 10,
+    token_budget: int = 4000,
+) -> dict:
+    """Combine Knowledge Base results and Arc memories into one Context Capsule.
+
+    Returns the smallest useful, source-grounded set of code, documentation,
+    graph facts and memories for the task, with provenance and validity on
+    every item.
+    """
+    try:
+        capsule = await _coordinator.assemble_context(
+            query=query,
+            workspace_id=workspace_id,
+            caller=_arc_caller(workspace_id, None, session_id or None),
+            keywords=keywords,
+            session_id=_UUID(session_id) if session_id else None,
+            limit=limit,
+            token_budget=token_budget,
+        )
+        return {"capsule": capsule.model_dump(mode="json")}
+    except Exception as exc:
+        return _arc_error(exc)
+
+
+
+
+
+
 def get_mcp_app() -> FastMCP:
     """Get the configured FastMCP application."""
     return mcp
