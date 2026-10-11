@@ -26,7 +26,7 @@ class McpServerClient:
 
     async def connect(self):
         """Connect to mcp-server via gRPC"""
-        mcp_server_addr = os.getenv("MCP_SERVER_GRPC_ADDR", "mcp-server:50056")
+        mcp_server_addr = os.environ["MCP_SERVER_GRPC_ADDR"]
 
         self.channel = grpc.aio.insecure_channel(mcp_server_addr)
         # self.stub = mcp_pb2_grpc.McpStub(self.channel)

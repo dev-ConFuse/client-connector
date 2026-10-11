@@ -48,8 +48,7 @@ RUN chown -R appuser:appuser /app
 # Switch to non-root user
 USER appuser
 
-# Set explicitly for Render fallbacks
-ENV PORT=8095
+# PORT is supplied at runtime via .map.env / .secret.env (see .cline/rules/env-policy.md)
 ENV PYTHONPATH=/app
 
 # Expose port
@@ -57,10 +56,10 @@ EXPOSE 8095
 
 # Health check optimized for Render
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:${PORT:-8095}/health || exit 1
+    CMD curl -f http://localhost:${PORT}/health || exit 1
 
 # Use dumb-init as PID 1 for proper signal handling
 ENTRYPOINT ["dumb-init", "--"]
 
 # Run
-CMD sh -c "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8095}"
+CMD sh -c "uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"

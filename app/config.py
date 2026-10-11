@@ -8,7 +8,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment."""
+    """Application settings loaded from environment.
+
+    Env-only configuration (`.map.env` → `.secret.env` → `.env.local`, see
+    `.cline/rules/env-policy.md`): no defaults for env-backed values — missing
+    required vars fail fast at boot.
+    """
 
     model_config = SettingsConfigDict(
         env_file=(".map.env", ".secret.env", ".env.local"),
@@ -18,42 +23,37 @@ class Settings(BaseSettings):
     )
 
     # Server
-    host: str = Field(default="0.0.0.0")
-    port: int = Field(alias="CLIENT_CONNECTOR_PORT", default=3020)
-    debug: bool = Field(default=False)
+    host: str = Field(alias="HOST")
+    port: int = Field(alias="CLIENT_CONNECTOR_PORT")
+    debug: bool = Field(alias="DEBUG")
 
 
 
     # Authentication
     auth_middleware_url: str = Field(alias="AUTH_MIDDLEWARE_URL")
-    api_key_header: str = Field(default="X-API-Key")
+    api_key_header: str = Field(alias="API_KEY_HEADER")
 
     # Database
     database_url: str = Field(alias="DATABASE_URL")
 
     # Rate Limiting
-    rate_limit_per_minute: int = Field(default=60)
-    rate_limit_burst: int = Field(default=10)
-    tier_rate_limits: dict[str, dict[str, int]] = Field(default={
-        "free": {"per_minute": 60, "burst": 10},
-        "pro": {"per_minute": 240, "burst": 20},
-        "team": {"per_minute": 480, "burst": 30},
-        "enterprise": {"per_minute": 1000, "burst": 50},
-    })
+    rate_limit_per_minute: int = Field(alias="RATE_LIMIT_PER_MINUTE")
+    rate_limit_burst: int = Field(alias="RATE_LIMIT_BURST")
+    tier_rate_limits: dict[str, dict[str, int]] = Field(alias="TIER_RATE_LIMITS")
 
     # Session
-    session_timeout_minutes: int = Field(default=60)
-    max_concurrent_clients: int = Field(default=100)
+    session_timeout_minutes: int = Field(alias="SESSION_TIMEOUT_MINUTES")
+    max_concurrent_clients: int = Field(alias="MAX_CONCURRENT_CLIENTS")
 
     # Logging
-    log_level: str = Field(default="info")
-    log_format: Literal["json", "console"] = Field(default="console")
+    log_level: str = Field(alias="LOG_LEVEL")
+    log_format: Literal["json", "console"] = Field(alias="LOG_FORMAT")
 
     # Downstream Services (for MCP gateway operations)
     data_vent_url: str = Field(alias="DATA_VENT_URL")
 
     # Arc memory-unit service (Rust, port 3006) — authoritative memory store
-    arc_service_url: str = Field(alias="ARC_SERVICE_URL", default="http://localhost:3006")
+    arc_service_url: str = Field(alias="ARC_SERVICE_URL")
 
     # CORS
     cors_origins: str = Field(alias="CORS_ORIGINS")

@@ -39,7 +39,7 @@ from app.config import get_settings
 # data-vent retrieval service (configured in .env.local/map)
 settings = get_settings()
 DATA_VENT_URL = settings.data_vent_url
-SEARCH_TIMEOUT = int(os.getenv("SEARCH_TIMEOUT_SECS", "30"))
+SEARCH_TIMEOUT = int(os.environ["SEARCH_TIMEOUT_SECS"])
 
 # Shared compressor instance
 _compressor = PromptCompressor()
@@ -747,9 +747,9 @@ def main():
     # Get the configured FastMCP app
     mcp_app = get_mcp_app()
 
-    # Configuration
-    host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("APP_PORT", "8080"))
+    # Configuration (env-only — see .cline/rules/env-policy.md)
+    host = os.environ["HOST"]
+    port = int(os.environ["APP_PORT"])
 
     logger.info(
         "Starting ConFuse MCP Server",

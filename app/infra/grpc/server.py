@@ -58,8 +58,8 @@ async def serve_grpc():
     # Add servicer
     # client_pb2_grpc.add_ClientConnectorServicer_to_server(ClientConnectorServicer(), server)
 
-    # Configure server
-    grpc_port = int(os.getenv("GRPC_PORT", "50059"))
+    # Configure server (env-only — see .cline/rules/env-policy.md)
+    grpc_port = int(os.environ["GRPC_PORT"])
     server.add_insecure_port(f"[::]:{grpc_port}")
 
     logger.info(f"Starting client-connector gRPC server on port {grpc_port}")
