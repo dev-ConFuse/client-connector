@@ -44,7 +44,7 @@ async def init_postgresql() -> None:
 
     _session_factory = async_sessionmaker(_engine, class_=AsyncSession, expire_on_commit=False)
 
-    # Create tables with retries for cold start / availability
+    # Create tables with retries for startup races / availability
     max_retries = 5
     retry_delay = 2
     for attempt in range(max_retries):

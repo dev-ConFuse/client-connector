@@ -64,7 +64,7 @@ original_handle_post_message = SseServerTransport.handle_post_message
 async def patched_connect_sse(self, scope, receive, send):
     request = Request(scope, receive)
     
-    # Bypass strict host validation which fails on Render (e.g. client-connector.onrender.com) and custom domains (e.g. cln.confuse.site)
+    # Bypass strict host validation which fails behind reverse proxies and custom domains (e.g. cln.confuse.site)
     # error_response = await self._security.validate_request(request, is_post=False)
     # if error_response:
     #     await error_response(scope, receive, send)
@@ -118,7 +118,7 @@ async def patched_handle_post_message(self, scope, receive, send):
 
     request = Request(scope, receive)
     
-    # Bypass strict host validation which fails on Render and custom domains
+    # Bypass strict host validation which fails behind reverse proxies and custom domains
     # error_response = await self._security.validate_request(request, is_post=True)
     # if error_response:
     #     return await error_response(scope, receive, send)
