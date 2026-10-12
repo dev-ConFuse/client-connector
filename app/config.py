@@ -31,6 +31,7 @@ class Settings(BaseSettings):
 
     # Authentication
     auth_middleware_url: str = Field(alias="AUTH_MIDDLEWARE_URL")
+    auth_grpc_addr: str = Field(alias="AUTH_GRPC_ADDR")
     api_key_header: str = Field(alias="API_KEY_HEADER")
 
     # Database

@@ -144,8 +144,8 @@ async def validate_jwt_token(
     # Try gRPC if available
     if auth_v1_pb2_grpc and auth_v1_pb2:
         try:
-            auth_grpc_url = getattr(settings, "auth_grpc_url", "localhost:50058")
-            async with grpc.aio.insecure_channel(auth_grpc_url) as channel:
+            auth_grpc_addr = settings.auth_grpc_addr
+            async with grpc.aio.insecure_channel(auth_grpc_addr) as channel:
                 stub = auth_v1_pb2_grpc.AuthStub(channel)
                 request = auth_v1_pb2.ValidateTokenRequest(token=token)
                 response = await stub.ValidateToken(request, timeout=2.0)
@@ -176,8 +176,8 @@ async def validate_api_key(
     # Try gRPC if available
     if auth_v1_pb2_grpc and auth_v1_pb2:
         try:
-            auth_grpc_url = getattr(settings, "auth_grpc_url", "localhost:50058")
-            async with grpc.aio.insecure_channel(auth_grpc_url) as channel:
+            auth_grpc_addr = settings.auth_grpc_addr
+            async with grpc.aio.insecure_channel(auth_grpc_addr) as channel:
                 stub = auth_v1_pb2_grpc.AuthStub(channel)
                 request = auth_v1_pb2.ValidateApiKeyRequest(api_key=api_key)
                 response = await stub.ValidateApiKey(request, timeout=2.0)
