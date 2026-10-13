@@ -8,6 +8,15 @@ from contextlib import asynccontextmanager
 from typing import Any
 from uuid import uuid4
 
+from dotenv import load_dotenv
+
+# Load environment variables from .map.env (non-sensitive), .secret.env (sensitive),
+# and .env.local — same loader pattern as doc-data-con / repo-data-con. Required
+# because app.mcp_server reads raw os.environ values (see env-policy.md).
+load_dotenv(".map.env")
+load_dotenv(".secret.env", override=True)
+load_dotenv(".env.local", override=True)
+
 import structlog
 from fastapi import Depends, FastAPI, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
