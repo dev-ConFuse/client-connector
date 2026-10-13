@@ -137,10 +137,6 @@ async def patched_handle_post_message(self, scope, receive, send):
         response = Response("Could not find session", status_code=404)
         return await response(scope, receive, send)
     body = await request.body()
-
-    # DEBUG PRINT
-    print(f"[DEBUG] Received POST body: {body.decode('utf-8', errors='replace')}")
-
     try:
         message = types.JSONRPCMessage.model_validate_json(body)
     except ValidationError as err:

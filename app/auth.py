@@ -11,11 +11,8 @@ from fastapi import Depends, Header, HTTPException, Request, status
 try:
     from app.proto import auth_v1_pb2, auth_v1_pb2_grpc
 except ImportError:
-    try:
-        from proto import auth_v1_pb2, auth_v1_pb2_grpc
-    except ImportError:
-        auth_v1_pb2 = None
-        auth_v1_pb2_grpc = None
+    auth_v1_pb2 = None
+    auth_v1_pb2_grpc = None
 
 from app.config import Settings, get_settings
 
