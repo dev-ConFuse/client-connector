@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 from uuid import uuid4
 
+import logging
 from dotenv import load_dotenv
 
 # Load environment variables from .map.env (non-sensitive), .secret.env (sensitive),
@@ -18,6 +19,7 @@ load_dotenv(".secret.env", override=True)
 load_dotenv(".env.local", override=True)
 
 import structlog
+import time
 from fastapi import Depends, FastAPI, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -27,7 +29,36 @@ from app.config import get_settings
 from app.infra.db.postgres import close_postgresql, init_postgresql
 from app.services import get_session_manager, shutdown_session_manager
 
-# Configure structured logging
+SENSITIVE_QUERY_KEYS = ("token", "key", "secret", "password", "auth")
+
+
+def _resolve_level(level: str) -> int:
+    """Map LOG_LEVEL to a logging level, failing fast on unknown values."""
+    value = logging._nameToLevel.get(level.upper())
+    if value is None:
+        raise ValueError(
+            f"Invalid LOG_LEVEL: {level!r} (expected debug/info/warning/error/critical)"
+        )
+    return value
+
+
+def sanitize_query(query: str) -> str:
+    """Redact secret-looking query values so access logs never leak credentials."""
+    if not query:
+        return query
+    parts = []
+    for pair in query.split("&"):
+        key = pair.split("=", 1)[0]
+        if any(needle in key.lower() for needle in SENSITIVE_QUERY_KEYS):
+            parts.append(f"{key}=[redacted]")
+        else:
+            parts.append(pair)
+    return "&".join(parts)
+
+
+# Configure structured logging (level/format from LOG_LEVEL / LOG_FORMAT —
+# values live in .map.env, see env-policy.md)
+_settings = get_settings()
 structlog.configure(
     processors=[
         structlog.contextvars.merge_contextvars,
@@ -36,15 +67,29 @@ structlog.configure(
         structlog.stdlib.add_log_level,
         structlog.stdlib.PositionalArgumentsFormatter(),
         structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.CallsiteParameterAdder(
+            {
+                structlog.processors.CallsiteParameter.FILENAME,
+                structlog.processors.CallsiteParameter.FUNC_NAME,
+                structlog.processors.CallsiteParameter.LINENO,
+            }
+        ),
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
         structlog.processors.UnicodeDecoder(),
-        structlog.processors.JSONRenderer(),
+        (
+            structlog.processors.JSONRenderer()
+            if _settings.log_format == "json"
+            else structlog.dev.ConsoleRenderer(colors=True)
+        ),
     ],
     wrapper_class=structlog.stdlib.BoundLogger,
     context_class=dict,
     logger_factory=structlog.stdlib.LoggerFactory(),
     cache_logger_on_first_use=True,
+)
+logging.getLogger().setLevel(
+    _resolve_level(_settings.log_level)
 )
 
 logger = structlog.get_logger()
@@ -96,7 +141,10 @@ async def lifespan(app: FastAPI):
 
 
 class CorrelationIdMiddleware:
-    """Middleware to extract or generate a correlation ID and bind it to structlog."""
+    """Middleware to extract or generate a correlation ID and bind it to structlog.
+
+    Pure-ASGI so WebSocket and SSE (MCP) scopes pass through untouched.
+    """
     def __init__(self, app):
         self.app = app
 
@@ -105,14 +153,38 @@ class CorrelationIdMiddleware:
             return await self.app(scope, receive, send)
 
         headers = dict(scope.get("headers", []))
-        correlation_id = headers.get(b"x-correlation-id", uuid4().hex.encode()).decode("utf-8")
+        correlation_id = (
+            headers.get(b"x-correlation-id")
+            or headers.get(b"x-request-id")
+            or uuid4().hex.encode()
+        ).decode("utf-8")
 
         structlog.contextvars.clear_contextvars()
-        structlog.contextvars.bind_contextvars(correlation_id=correlation_id)
+        structlog.contextvars.bind_contextvars(
+            correlation_id=correlation_id,
+            http_method=scope.get("method"),
+            http_path=scope.get("path"),
+        )
+
+        # Access-log bookkeeping for plain HTTP requests
+        is_http = scope["type"] == "http"
+        log = structlog.get_logger("access")
+        start = time.perf_counter()
+        if is_http:
+            raw_query = scope.get("query_string", b"").decode("utf-8", "replace")
+            log.debug(
+                "request started",
+                query=sanitize_query(raw_query),
+                client=(scope.get("client") or ("?", 0))[0],
+                user_agent=headers.get(b"user-agent", b"").decode("utf-8", "replace") or None,
+            )
+
+        status_holder: list[int] = []
 
         async def send_wrapper(message):
             try:
                 if message["type"] == "http.response.start":
+                    status_holder.append(message["status"])
                     # Add the correlation ID to the response headers
                     res_headers = message.setdefault("headers", [])
                     res_headers.append((b"x-correlation-id", correlation_id.encode("utf-8")))
@@ -131,7 +203,40 @@ class CorrelationIdMiddleware:
             if "Unexpected ASGI message" in str(e):
                 pass
             else:
+                if is_http:
+                    log.error(
+                        "request failed",
+                        outcome="server_error",
+                        duration_ms=round((time.perf_counter() - start) * 1000, 2),
+                        exc_info=True,
+                    )
                 raise
+        except Exception:
+            if is_http:
+                log.error(
+                    "request failed",
+                    outcome="server_error",
+                    duration_ms=round((time.perf_counter() - start) * 1000, 2),
+                    exc_info=True,
+                )
+            raise
+
+        if is_http and status_holder:
+            duration_ms = round((time.perf_counter() - start) * 1000, 2)
+            status = status_holder[0]
+            base = {
+                "status": status,
+                "duration_ms": duration_ms,
+                "client": (scope.get("client") or ("?", 0))[0],
+            }
+            if status < 300:
+                log.info("request completed", outcome="success", **base)
+            elif status < 400:
+                log.warning("request redirected", outcome="redirect", **base)
+            elif status < 500:
+                log.warning("request failed", outcome="client_error", **base)
+            else:
+                log.error("request failed", outcome="server_error", **base)
 
 
 def create_app() -> FastAPI:
