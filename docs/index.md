@@ -2,6 +2,11 @@
 
 > **MCP Protocol Gateway for AI Agents**
 
+> **Current runtime protocols:** REST/HTTP, MCP over SSE, and an outbound
+> gRPC client to auth-middleware. There is no client-connector gRPC server,
+> MCP-server gRPC integration, or WebSocket endpoint. Older WebSocket design
+> details below are historical and not implemented by the current app.
+
 ## What is this service?
 
 The **client-connector** is ConFuse's dedicated **MCP (Model Context Protocol) gateway** that enables AI agents (Cursor, Claude, etc.) to securely connect to and query the ConFuse knowledge platform. It acts as the bridge between AI agents and the ConFuse infrastructure.
@@ -29,16 +34,15 @@ cp .secret.env.example .secret.env
 uvicorn app.main:app --host 0.0.0.0 --port 3020
 ```
 
-The service starts at:
-- **HTTP**: `http://localhost:3020`
-- **WebSocket**: `/ws` endpoint for MCP connections
+The service starts at `http://localhost:3020`. MCP clients connect over SSE at
+`/api/v1/mcp/sse`; there is no `/ws` endpoint.
 
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
 | [Architecture](architecture.md) | MCP gateway design and flows |
-| [API Reference](api-reference.md) | REST and WebSocket endpoints |
+| [API Reference](api-reference.md) | REST and MCP SSE endpoints |
 | [Setup](setup.md) | Environment variables and local setup |
 | [README](README.md) | Service overview, API surface, MCP tool flow |
 
@@ -76,7 +80,9 @@ graph TD
     class AM,FT,DV,MCP support
 ```
 
-Note: the client-connector's gRPC helper/server implementations are located in `app/infra/grpc` (previously in a top-level `infra/grpc`).
+The current gRPC integration is an outbound client for auth-middleware token
+validation. Unused client-connector gRPC server and MCP-server client
+scaffolding has been removed.
 
 ## Key Features
 
@@ -184,7 +190,7 @@ HOST=0.0.0.0
 ENVIRONMENT=production
 MCP_SERVER_URL=http://mcp-server:3006
 MCP_SERVER_MODE=http
-AUTH_MIDDLEWARE_GRPC_ADDR=http://auth-middleware:3010
+AUTH_GRPC_ADDR=auth-middleware:50058
 FEATURE_TOGGLE_SERVICE_URL=http://feature-toggle:3099
 DATA_VENT_URL=http://data-vent:3002
 CORS_ORIGINS=http://localhost:3000,http://localhost:3020

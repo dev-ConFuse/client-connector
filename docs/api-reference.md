@@ -1,13 +1,16 @@
 # Client Connector API Reference
 
-> **Complete REST, WebSocket, and MCP Protocol Documentation**
+> Current transports are REST/HTTP and MCP over SSE at
+> `/api/v1/mcp/sse`. The legacy WebSocket examples retained below are not
+> implemented by the current service.
+
+> **REST and MCP Protocol Documentation**
 
 ## Overview
 
-The Client Connector provides three main API interfaces:
+The Client Connector provides two API interfaces:
 1. **REST API** - Service management and monitoring
-2. **WebSocket API** - Real-time MCP protocol communication
-3. **MCP Protocol** - Model Context Protocol for AI agents
+2. **MCP over SSE** - Model Context Protocol for AI agents
 
 ## REST API
 
@@ -162,7 +165,11 @@ Authorization: Bearer <token>
 }
 ```
 
-## WebSocket API
+## Historical WebSocket Design (Not Implemented)
+
+The following examples are retained for historical context only. They are not
+supported by the current client-connector runtime. Use the MCP SSE endpoint
+`/api/v1/mcp/sse` instead.
 
 ### Connection Endpoint
 ```

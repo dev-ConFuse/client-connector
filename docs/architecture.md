@@ -1,6 +1,9 @@
-# Client Connector Architecture
+# Client Connector Architecture (Current Runtime)
 
 > **MCP Gateway Design and Implementation Details**
+
+> Current transport topology is shown first. The component-level WebSocket
+> examples below are historical and are not implemented by the current app.
 
 ## System Architecture Overview
 
@@ -15,7 +18,7 @@ graph TB
     
     %% Gateway Layer
     subgraph "Client Connector (Port 3020)"
-        WS[WebSocket Server]
+        HTTP[REST and MCP SSE]
         MCP[MCP Protocol Handler]
         Auth[Authentication Layer]
         QP[Query Processor]
@@ -24,7 +27,7 @@ graph TB
     
     %% Service Layer
     subgraph "Internal Services"
-        AuthMW[Auth-Middleware<br/>gRPC: 50058]
+        AuthMW[Auth-Middleware<br/>REST :3010, private gRPC :50058]
         FT[Feature-Toggle<br/>Port: 3099]
         DV[Data-Vent<br/>Port: 3002]
     end
@@ -36,16 +39,16 @@ graph TB
     end
     
     %% Connections
-    Cursor -->|WebSocket/MCP| WS
-    Claude -->|WebSocket/MCP| WS
-    Custom -->|WebSocket/MCP| WS
+    Cursor -->|MCP SSE / HTTP| HTTP
+    Claude -->|MCP SSE / HTTP| HTTP
+    Custom -->|MCP SSE / HTTP| HTTP
     
-    WS --> MCP
+    HTTP --> MCP
     MCP --> Auth
     Auth --> QP
     QP --> SM
     
-    Auth -->|gRPC| AuthMW
+    Auth -->|gRPC on private network| AuthMW
     QP -->|HTTP| FT
     QP -->|HTTP| DV
     
@@ -58,15 +61,29 @@ graph TB
     classDef storage fill:#fff3e0
     
     class Cursor,Claude,Custom agent
-    class WS,MCP,Auth,QP,SM gateway
+    class HTTP,MCP,Auth,QP,SM gateway
     class AuthMW,FT,DV service
     class PG,FDB storage
 ```
 
+## Current Protocols
+
+- REST endpoints and the FastMCP SSE application are served by the FastAPI app
+  on port 3020. MCP SSE is mounted at `/api/v1/mcp/sse`.
+- The connector makes outbound gRPC calls to auth-middleware at
+  `auth-middleware:50058` on the private container network.
+- There is no client-connector gRPC server, separate MCP-server gRPC client,
+  or WebSocket `/ws` endpoint.
+
+## Historical Design Notes (Not Implemented)
+
+The component-level examples below describe an earlier WebSocket design and
+must not be used as implementation or deployment guidance.
+
 ## Core Components
 
-### 1. **WebSocket Server**
-**Purpose**: Handle incoming WebSocket connections from AI agents
+### 1. **WebSocket Server (Historical)**
+**Purpose**: This proposed server is not part of the current implementation.
 
 **Key Features**:
 - **Connection Management**: Accept/reject connections based on auth status
@@ -158,8 +175,8 @@ async def handle_tools_call(session: AgentSession, params: dict):
 ```python
 async def authenticate_websocket(token: str) -> AuthUser:
     # Validate JWT with auth-middleware
-    async with grpc.aio.insecure_channel(AUTH_MIDDLEWARE_GRPC_ADDR) as channel:
-        stub = auth_pb2_grpc.AuthServiceStub(channel)
+    async with grpc.aio.insecure_channel(AUTH_GRPC_ADDR) as channel:
+        stub = auth_pb2_grpc.AuthStub(channel)
         request = auth_pb2.ValidateTokenRequest(token=token)
         response = await stub.ValidateToken(request)
         
@@ -173,7 +190,9 @@ async def authenticate_websocket(token: str) -> AuthUser:
     )
 ```
 
-Note: gRPC helper/server code for the client-connector is in `app/infra/grpc` (moved from top-level `infra/grpc`).
+The live gRPC integration is only the outbound auth-middleware client. The
+client-connector does not host a gRPC server or use a separate MCP-server
+gRPC client.
 
 ### 4. **Query Processor**
 **Purpose**: Process agent queries and route to knowledge graph
@@ -330,8 +349,8 @@ sequenceDiagram
 # Auth-Middleware Integration
 class AuthService:
     def __init__(self):
-        self.channel = grpc.aio.insecure_channel(AUTH_MIDDLEWARE_GRPC_ADDR)
-        self.stub = auth_pb2_grpc.AuthServiceStub(self.channel)
+        self.channel = grpc.aio.insecure_channel(AUTH_GRPC_ADDR)
+        self.stub = auth_pb2_grpc.AuthStub(self.channel)
     
     async def validate_token(self, token: str) -> AuthUser:
         request = auth_pb2.ValidateTokenRequest(token=token)

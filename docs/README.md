@@ -7,7 +7,7 @@ knowledge search through the Model Context Protocol.
 > [`docs/`](./)** (this folder). See [index.md](index.md) for the docs index.
 
 **Service**: `client-connector/` · **Port**: `3020` (`CLIENT_CONNECTOR_PORT`)
-**Stack**: Python 3.12, FastAPI, FastMCP, gRPC, WebSockets
+**Stack**: Python 3.12, FastAPI, FastMCP, gRPC
 
 ## Overview
 
@@ -16,12 +16,12 @@ other MCP clients):
 
 - **MCP server** (FastMCP) with tools: `search_knowledge` (vector search),
   `query_knowledge` (natural-language, streaming), `health_check`
-- **SSE/WebSocket transports** for MCP sessions (`/api/v1/mcp/sse`)
+- **MCP over Server-Sent Events (SSE)** at `/api/v1/mcp/sse`
 - **Agent registry** — JSON-MCP config bootstrap per agent
   (`GET /api/agents/{agent_id}/mcp-config`)
 - **Prompt compression** — compacts results for LLM context budgets
 - **Tiered rate limiting** — free / pro / team / enterprise budgets
-- **gRPC clients** — auth-middleware token validation and mcp-server tools
+- **gRPC client** — auth-middleware token validation
 
 ## Key API surface
 
@@ -48,8 +48,7 @@ python main.py
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `CLIENT_CONNECTOR_PORT` | HTTP port | `3020` |
-| `AUTH_MIDDLEWARE_GRPC_ADDR` | auth-middleware gRPC | `auth-middleware:50058` |
-| `MCP_SERVER_GRPC_ADDR` | mcp-server gRPC | `mcp-server:50056` |
+| `AUTH_GRPC_ADDR` | Internal auth-middleware gRPC (private container network) | `auth-middleware:50058` |
 | `DATA_VENT_URL` | retrieval backend | `http://localhost:3002` |
 
 ## Testing
