@@ -9,6 +9,7 @@ from typing import Any
 from uuid import uuid4
 
 import logging
+import sys
 from dotenv import load_dotenv
 
 # Load environment variables from .map.env (non-sensitive), .secret.env (sensitive),
@@ -56,6 +57,31 @@ def sanitize_query(query: str) -> str:
     return "&".join(parts)
 
 
+def _configure_stdlib_logging() -> None:
+    """Send stdlib records to stdout as bare messages (one JSON line each).
+
+    Why: the MCP tooling (fastmcp) installs a rich console handler at import
+    time whose word-wrapping breaks the one-JSON-object-per-line contract, so
+    this is re-asserted after the MCP app is created — `force=True` replaces
+    whatever handler was installed in the meantime.
+    """
+    logging.basicConfig(
+        format="%(message)s",
+        stream=sys.stdout,
+        level=_resolve_level(_settings.log_level),
+        force=True,
+    )
+    # uvicorn's access log is a second, unredacted access record (it logs the raw
+    # query string) — the ASGI middleware emits the contract record instead.
+    # A drop filter (not `disabled`): uvicorn's dictConfig runs after app import
+    # and resets logger flags, but it never removes filters.
+    class _DropAccessLogFilter(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            return False
+
+    logging.getLogger("uvicorn.access").addFilter(_DropAccessLogFilter())
+
+
 # Configure structured logging (level/format from LOG_LEVEL / LOG_FORMAT —
 # values live in .map.env, see env-policy.md)
 _settings = get_settings()
@@ -91,6 +117,7 @@ structlog.configure(
 logging.getLogger().setLevel(
     _resolve_level(_settings.log_level)
 )
+_configure_stdlib_logging()
 
 logger = structlog.get_logger()
 
@@ -162,21 +189,22 @@ class CorrelationIdMiddleware:
         structlog.contextvars.clear_contextvars()
         structlog.contextvars.bind_contextvars(
             correlation_id=correlation_id,
-            http_method=scope.get("method"),
-            http_path=scope.get("path"),
+            method=scope.get("method"),
+            path=scope.get("path"),
         )
 
         # Access-log bookkeeping for plain HTTP requests
         is_http = scope["type"] == "http"
         log = structlog.get_logger("access")
         start = time.perf_counter()
+        raw_query = scope.get("query_string", b"").decode("utf-8", "replace")
+        user_agent = headers.get(b"user-agent", b"").decode("utf-8", "replace") or None
         if is_http:
-            raw_query = scope.get("query_string", b"").decode("utf-8", "replace")
             log.debug(
                 "request started",
                 query=sanitize_query(raw_query),
                 client=(scope.get("client") or ("?", 0))[0],
-                user_agent=headers.get(b"user-agent", b"").decode("utf-8", "replace") or None,
+                user_agent=user_agent,
             )
 
         status_holder: list[int] = []
@@ -227,7 +255,9 @@ class CorrelationIdMiddleware:
             base = {
                 "status": status,
                 "duration_ms": duration_ms,
+                "query": sanitize_query(raw_query),
                 "client": (scope.get("client") or ("?", 0))[0],
+                "user_agent": user_agent,
             }
             if status < 300:
                 log.info("request completed", outcome="success", **base)
@@ -273,6 +303,10 @@ def create_app() -> FastAPI:
 
     # Using a versioned, fixed API endpoint for MCP
     app.mount("/api/v1/mcp", get_mcp_app().sse_app())
+
+    # Re-assert the clean stdlib handler: creating the MCP app can install rich
+    # console handlers that wrap records across lines (see _configure_stdlib_logging).
+    _configure_stdlib_logging()
 
     # Root endpoint for UptimeRobot
     @app.api_route("/", methods=["GET", "HEAD"])
